@@ -1,0 +1,174 @@
+# =============================================================================
+# Stokowski — Example State Machine Workflow
+# =============================================================================
+#
+# Copy this file to workflow.yaml and customise for your project.
+# Stokowski re-reads this file on every poll tick — changes take effect
+# without restart.
+#
+# Linear states mapping:
+#   active        → the "working" state for agent stages
+#   review        → human review / PR review state
+#   gate_approved → human approved a gate (triggers transition)
+#   rework        → human requested changes (triggers rework_to)
+#   terminal      → list of done/closed states
+#
+# State types:
+#   agent    — Stokowski dispatches Claude Code in this state
+#   gate     — pauses for human review; approve → next, rework → rework_to
+#   terminal — issue is finished; workspace cleaned up
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Tracker
+# ---------------------------------------------------------------------------
+tracker:
+  kind: linear
+  project_slug: "abc123def456"    # hex slugId from your Linear project URL
+  api_key: "lin_api_your_key_here"  # your Linear API key
+
+# ---------------------------------------------------------------------------
+# Linear state name mapping
+# ---------------------------------------------------------------------------
+linear_states:
+  todo: "Todo"
+  active: "In Progress"
+  review: "Human Review"
+  gate_approved: "Gate Approved"
+  rework: "Rework"
+  terminal:
+    - Done
+    - Closed
+    - Cancelled
+    - Canceled
+    - Duplicate
+
+# ---------------------------------------------------------------------------
+# Polling
+# ---------------------------------------------------------------------------
+polling:
+  interval_ms: 15000
+
+# ---------------------------------------------------------------------------
+# Workspace
+# ---------------------------------------------------------------------------
+workspace:
+  root: ~/code/stokowski-workspaces
+
+# ---------------------------------------------------------------------------
+# Hooks
+# ---------------------------------------------------------------------------
+hooks:
+  after_create: |
+    git clone --depth 1 git@github.com:your-org/your-repo.git .
+    npm install
+  before_run: |
+    git fetch origin main
+    git rebase origin/main 2>/dev/null || git rebase --abort
+  timeout_ms: 120000
+
+# ---------------------------------------------------------------------------
+# Claude defaults
+# ---------------------------------------------------------------------------
+claude:
+  permission_mode: auto
+  model: claude-sonnet-4-6
+  max_turns: 20
+  turn_timeout_ms: 3600000
+  stall_timeout_ms: 300000
+
+# ---------------------------------------------------------------------------
+# Agent concurrency
+# ---------------------------------------------------------------------------
+agent:
+  max_concurrent_agents: 4
+  max_retry_backoff_ms: 300000
+  max_concurrent_agents_by_state:
+    investigate: 2
+    implement: 2
+    code-review: 1
+
+# ---------------------------------------------------------------------------
+# Prompts
+# ---------------------------------------------------------------------------
+prompts:
+  global_prompt: prompts/global.example.md
+
+# ---------------------------------------------------------------------------
+# Server (optional web dashboard)
+# ---------------------------------------------------------------------------
+server:
+  port: 4200
+
+# ---------------------------------------------------------------------------
+# State machine
+# ---------------------------------------------------------------------------
+states:
+
+  investigate:
+    type: agent
+    prompt: prompts/investigate.example.md
+    linear_state: active
+    model: claude-opus-4-6
+    max_turns: 8
+    session: inherit
+    transitions:
+      complete: research-review
+
+  research-review:
+    type: gate
+    linear_state: review
+    rework_to: investigate
+    max_rework: 3
+    transitions:
+      approve: implement
+
+  implement:
+    type: agent
+    prompt: prompts/implement.example.md
+    linear_state: active
+    model: claude-sonnet-4-6
+    max_turns: 30
+    session: inherit
+    transitions:
+      complete: implementation-review
+
+  implementation-review:
+    type: gate
+    linear_state: review
+    rework_to: implement
+    max_rework: 5
+    transitions:
+      approve: code-review
+
+  code-review:
+    type: agent
+    prompt: prompts/review.example.md
+    linear_state: active
+    runner: claude
+    model: claude-opus-4-6
+    max_turns: 10
+    session: fresh
+    transitions:
+      complete: merge-review
+
+  merge-review:
+    type: gate
+    linear_state: review
+    rework_to: implement
+    max_rework: 5
+    transitions:
+      approve: merge
+
+  merge:
+    type: agent
+    prompt: prompts/merge.example.md
+    linear_state: active
+    max_turns: 5
+    session: inherit
+    transitions:
+      complete: done
+
+  done:
+    type: terminal
+    linear_state: terminal

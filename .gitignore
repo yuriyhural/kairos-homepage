@@ -1,0 +1,17 @@
+.vercel
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+dist/
+build/
+*.log
+.env
+
+# Stokowski operator-local files (copy from .example to use)
+workflow.yaml
+workflow.yml
+prompts/*.md
+!prompts/*.example.md
